@@ -15,10 +15,11 @@ except ImportError:
 
 
 # ==============================================================================
-# 功能模块 1: PPT 逐页导出 (全新 Slide.Export 方式)
+# 功能模块 1: PPT 逐页导出
 # ==============================================================================
 def _process_export_transparent_png(input_path, output_dir, dpi_str, target_ratio_mode,
-                                    enable_exp, exp_w, exp_h, exp_anchor):
+                                    enable_exp, exp_w, exp_h, exp_anchor,
+                                    use_transparent_bg, bg_rgb_str):
     # 1. 环境检查
     if platform.system() != 'Windows':
         messagebox.showerror("系统不支持", "PPT 导出功能仅支持 Windows 系统。")
@@ -30,8 +31,8 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
         messagebox.showwarning("提示", "路径不能为空！")
         return
 
-    # 2. 解析 DPI
-    target_dpi = 216  # 默认值
+    # 2. 解析参数
+    target_dpi = 216
     try:
         nums = re.findall(r"\d+", str(dpi_str))
         if nums:
@@ -42,16 +43,27 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
         messagebox.showerror("错误", "DPI 必须是 30 到 3000 之间的整数。")
         return
 
-    # 3. 检查实验性参数
-    final_target_w = 0
-    final_target_h = 0
+    # 解析背景色
+    bg_color_int = 16777215  # Default White
+    if not use_transparent_bg:
+        try:
+            rgb_clean = bg_rgb_str.replace("，", ",").replace(" ", "")
+            r, g, b = map(int, rgb_clean.split(','))
+            bg_color_int = r + (g * 256) + (b * 65536)
+        except:
+            messagebox.showerror("错误", "背景色 RGB 格式错误 (例如: 255,255,255)")
+            return
+
+    # 实验性参数
+    final_target_w, final_target_h = 0, 0
     if enable_exp:
         try:
             final_target_w = int(exp_w)
             final_target_h = int(exp_h)
-            if final_target_w <= 0 or final_target_h <= 0: raise ValueError
+            if final_target_w <= 0 or final_target_h <= 0:
+                raise ValueError
         except:
-            messagebox.showerror("输入错误", "实验性功能的宽/高必须为正整数。")
+            messagebox.showerror("输入错误", "手动设置的宽/高必须为正整数。")
             return
 
     abs_output = os.path.abspath(output_dir)
@@ -76,19 +88,21 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
         slide_w_points = pres.PageSetup.SlideWidth
         slide_h_points = pres.PageSetup.SlideHeight
 
-        # === 计算目标分辨率 ===
+        # 计算导出分辨率
         scale_factor = target_dpi / 72.0
         base_px_w = int(slide_w_points * scale_factor)
         base_px_h = int(slide_h_points * scale_factor)
 
-        # 处理比例
-        export_h = base_px_h
+        target_h = base_px_h
         if target_ratio_mode == "16:9":
-            export_h = int(base_px_w * 9 / 16)
+            target_h = int(base_px_w * 9 / 16)
         elif target_ratio_mode == "4:3":
-            export_h = int(base_px_w * 3 / 4)
+            target_h = int(base_px_w * 3 / 4)
         elif target_ratio_mode == "1:1":
-            export_h = base_px_w
+            target_h = base_px_w
+
+        final_w = final_target_w if enable_exp else base_px_w
+        final_h = final_target_h if enable_exp else target_h
 
         total_slides = pres.Slides.Count
         success_count = 0
@@ -98,27 +112,26 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
             save_name = f"slide_{i}.png"
             save_full_path = os.path.join(abs_output, save_name)
 
-            # 记录原始背景状态 (以便恢复)
             orig_follow = slide.FollowMasterBackground
             orig_visible = slide.Background.Fill.Visible
+            orig_color = slide.Background.Fill.ForeColor.RGB
+            ghost_shape = None
 
             try:
-                # === 核心修改：使用 Slide.Export 替代 ShapeRange ===
-                # 这种方法分辨率极其精准，不会出现偏差
+                # 1. 设置背景
+                slide.FollowMasterBackground = 0
+                if use_transparent_bg:
+                    slide.Background.Fill.Visible = 0
+                    slide.Background.Fill.Transparency = 1.0
+                else:
+                    slide.Background.Fill.Visible = 1
+                    slide.Background.Fill.ForeColor.RGB = bg_color_int
+                    slide.Background.Fill.Transparency = 0.0
 
-                # 1. 尝试强制设置背景透明
-                # 注意：这需要 PPT 设置支持，部分版本可能依旧输出白底
-                # 如果用户 PPT 母版有图片背景，这里可能无法去除，建议用户在 PPT 里删掉背景图
-                slide.FollowMasterBackground = 0  # 不跟随母版
-                slide.Background.Fill.Visible = 0  # 背景不可见 (透明)
-                slide.Background.Fill.Transparency = 1.0  # 100% 透明
+                # 2. 导出
+                slide.Export(save_full_path, "PNG", int(final_w), int(final_h))
 
-                # 2. 原生导出
-                # Export(FileName, FilterName, ScaleWidth, ScaleHeight)
-                # 直接传入计算好的整数宽高
-                slide.Export(save_full_path, "PNG", int(base_px_w), int(export_h))
-
-                # 3. === 实验性功能：OpenCV 二次处理 ===
+                # 3. 强制修正
                 if enable_exp:
                     img = cv2.imdecode(np.fromfile(save_full_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
                     if img is not None:
@@ -127,66 +140,58 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
                         elif img.shape[2] == 3:
                             img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
 
-                        h, w = img.shape[:2]
+                        h_curr, w_curr = img.shape[:2]
 
-                        if w != final_target_w or h != final_target_h:
-                            canvas = np.zeros((final_target_h, final_target_w, 4), dtype=np.uint8)
+                        if w_curr != final_w or h_curr != final_h:
+                            canvas = np.zeros((final_h, final_w, 4), dtype=np.uint8)
+                            anchor = exp_anchor
+                            x_off, y_off = 0, 0
 
-                            x_offset = 0
-                            y_offset = 0
-
-                            if "左" in exp_anchor:
-                                x_offset = 0
-                            elif "右" in exp_anchor:
-                                x_offset = final_target_w - w
+                            if "左" in anchor:
+                                x_off = 0
+                            elif "右" in anchor:
+                                x_off = final_w - w_curr
                             else:
-                                x_offset = (final_target_w - w) // 2
+                                x_off = (final_w - w_curr) // 2
 
-                            if "上" in exp_anchor:
-                                y_offset = 0
-                            elif "下" in exp_anchor:
-                                y_offset = final_target_h - h
+                            if "上" in anchor:
+                                y_off = 0
+                            elif "下" in anchor:
+                                y_off = final_h - h_curr
                             else:
-                                y_offset = (final_target_h - h) // 2
+                                y_off = (final_h - h_curr) // 2
 
-                            x1_c = max(0, x_offset)
-                            y1_c = max(0, y_offset)
-                            x2_c = min(final_target_w, x_offset + w)
-                            y2_c = min(final_target_h, y_offset + h)
-
-                            x1_img = max(0, -x_offset)
-                            y1_img = max(0, -y_offset)
+                            x1_c = max(0, x_off)
+                            y1_c = max(0, y_off)
+                            x2_c = min(final_w, x_off + w_curr)
+                            y2_c = min(final_h, y_off + h_curr)
+                            x1_i = max(0, -x_off)
+                            y1_i = max(0, -y_off)
 
                             w_slice = x2_c - x1_c
                             h_slice = y2_c - y1_c
 
                             if w_slice > 0 and h_slice > 0:
-                                canvas[y1_c:y2_c, x1_c:x2_c] = img[y1_img:y1_img + h_slice, x1_img:x1_img + w_slice]
+                                canvas[y1_c:y2_c, x1_c:x2_c] = img[y1_i:y1_i + h_slice, x1_i:x1_i + w_slice]
 
-                            is_success, buffer = cv2.imencode(".png", canvas)
-                            if is_success:
+                            success_write, buffer = cv2.imencode(".png", canvas)
+                            if success_write:
                                 buffer.tofile(save_full_path)
 
                 success_count += 1
 
             except Exception as e:
                 print(f"Page {i} error: {e}")
-
             finally:
-                # 恢复背景设置 (以免用户保存 PPT 后发现背景没了)
+                # 恢复背景
                 try:
                     slide.FollowMasterBackground = orig_follow
                     slide.Background.Fill.Visible = orig_visible
+                    slide.Background.Fill.ForeColor.RGB = orig_color
                 except:
                     pass
 
-        msg = f"导出成功: {success_count}/{total_slides} 页\n保存位置: {abs_output}"
-        if enable_exp:
-            msg += f"\n\n已强制调整为: {final_target_w}x{final_target_h}"
-        else:
-            msg += f"\n\n当前DPI: {target_dpi} (尺寸 {base_px_w}x{export_h})"
-
-        messagebox.showinfo("完成", msg)
+        messagebox.showinfo("完成", f"导出成功: {success_count}/{total_slides} 页\n保存位置: {abs_output}")
         try:
             os.startfile(abs_output)
         except:
@@ -195,7 +200,9 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
     except Exception as e:
         messagebox.showerror("错误", f"发生错误：\n{str(e)}")
     finally:
-        if pres: pres.Close()
+        # === 修复错误的关键部分 ===
+        if pres:
+            pres.Close()
         if ppt_app:
             try:
                 ppt_app.Quit()
@@ -204,63 +211,103 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
 
 
 # ==============================================================================
-# 功能模块 2: 批量裁切/扩展
+# 功能模块 2: 裁切/扩展 (支持单文件/批量)
 # ==============================================================================
-def _process_batch_crop_extend(folder_path, val_top, val_bottom, val_left, val_right):
-    if not folder_path or not os.path.exists(folder_path):
-        messagebox.showerror("错误", "请选择有效的文件夹！")
+def _process_crop_extend(source_path, is_file_mode, val_top, val_bottom, val_left, val_right):
+    if not source_path or not os.path.exists(source_path):
+        messagebox.showerror("错误", "路径不存在！")
         return
     try:
-        v_t, v_b, v_l, v_r = int(val_top), int(val_bottom), int(val_left), int(val_right)
+        v_t = int(val_top)
+        v_b = int(val_bottom)
+        v_l = int(val_left)
+        v_r = int(val_right)
     except:
         messagebox.showerror("错误", "裁切数值必须是整数。")
         return
 
-    valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
-    files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-    if not files:
-        messagebox.showwarning("提示", "没有找到图片。")
-        return
+    # 收集待处理文件列表
+    files_to_process = []
+
+    if is_file_mode:
+        # 单文件模式
+        if os.path.isfile(source_path):
+            files_to_process.append(source_path)
+        else:
+            messagebox.showerror("错误", "所选路径不是文件。")
+            return
+    else:
+        # 文件夹模式
+        if os.path.isdir(source_path):
+            valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
+            for f in os.listdir(source_path):
+                if f.lower().endswith(valid_exts):
+                    files_to_process.append(os.path.join(source_path, f))
+            if not files_to_process:
+                messagebox.showwarning("提示", "该文件夹下没有找到图片文件。")
+                return
+        else:
+            messagebox.showerror("错误", "所选路径不是文件夹。")
+            return
 
     success_count = 0
-    for filename in files:
-        file_path = os.path.join(folder_path, filename)
+    for file_path in files_to_process:
         try:
             img = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-            if img is None: continue
+            if img is None:
+                continue
+
             if len(img.shape) == 2:
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
             elif img.shape[2] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
 
             h, w = img.shape[:2]
-            crop_t, crop_b = max(0, v_t), max(0, v_b)
-            crop_l, crop_r = max(0, v_l), max(0, v_r)
+            crop_t = max(0, v_t)
+            crop_b = max(0, v_b)
+            crop_l = max(0, v_l)
+            crop_r = max(0, v_r)
 
-            if (crop_t + crop_b >= h) or (crop_l + crop_r >= w): continue
+            if (crop_t + crop_b >= h) or (crop_l + crop_r >= w):
+                print(f"Skipped {file_path}: Crop larger than image.")
+                continue
 
+            # 裁切
             if crop_t > 0 or crop_b > 0 or crop_l > 0 or crop_r > 0:
                 end_y = -crop_b if crop_b > 0 else None
                 end_x = -crop_r if crop_r > 0 else None
                 img = img[crop_t: end_y, crop_l: end_x]
 
-            pad_t, pad_b = abs(min(0, v_t)), abs(min(0, v_b))
-            pad_l, pad_r = abs(min(0, v_l)), abs(min(0, v_r))
+            # 扩展
+            pad_t = abs(min(0, v_t))
+            pad_b = abs(min(0, v_b))
+            pad_l = abs(min(0, v_l))
+            pad_r = abs(min(0, v_r))
 
             if pad_t > 0 or pad_b > 0 or pad_l > 0 or pad_r > 0:
                 img = cv2.copyMakeBorder(img, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=(0, 0, 0, 0))
 
-            name_part, ext_part = os.path.splitext(filename)
+            # 覆盖保存
+            dir_name = os.path.dirname(file_path)
+            base_name = os.path.basename(file_path)
+            name_part, ext_part = os.path.splitext(base_name)
+
             if ext_part.lower() == '.png':
-                is_success, buffer = cv2.imencode(".png", img)
-                if is_success: buffer.tofile(file_path); success_count += 1
+                success_write, buffer = cv2.imencode(".png", img)
+                if success_write:
+                    buffer.tofile(file_path)
+                    success_count += 1
             else:
-                new_path = os.path.join(folder_path, name_part + ".png")
-                is_success, buffer = cv2.imencode(".png", img)
-                if is_success: buffer.tofile(new_path); os.remove(file_path); success_count += 1
+                new_path = os.path.join(dir_name, name_part + ".png")
+                success_write, buffer = cv2.imencode(".png", img)
+                if success_write:
+                    buffer.tofile(new_path)
+                    os.remove(file_path)  # 删除原图
+                    success_count += 1
         except Exception as e:
-            print(f"Error {filename}: {e}")
-    messagebox.showinfo("完成", f"批量处理完成！共 {success_count} 张。")
+            print(f"Error processing {file_path}: {e}")
+
+    messagebox.showinfo("完成", f"处理完成！共 {success_count} 张。")
 
 
 # ==============================================================================
@@ -287,7 +334,8 @@ def _process_batch_remove_bg(folder_path, rgb_str, tolerance):
         file_path = os.path.join(folder_path, filename)
         try:
             img = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-            if img is None: continue
+            if img is None:
+                continue
             if len(img.shape) == 2:
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
             elif img.shape[2] == 3:
@@ -296,23 +344,25 @@ def _process_batch_remove_bg(folder_path, rgb_str, tolerance):
             lower = np.array([max(0, b - tolerance), max(0, g - tolerance), max(0, r - tolerance), 0])
             upper = np.array([min(255, b + tolerance), min(255, g + tolerance), min(255, r + tolerance), 255])
 
-            bgr = img[:, :, :3]
-            lower_bgr = np.array([max(0, b - tolerance), max(0, g - tolerance), max(0, r - tolerance)])
-            upper_bgr = np.array([min(255, b + tolerance), min(255, g + tolerance), min(255, r + tolerance)])
-            mask = cv2.inRange(bgr, lower_bgr, upper_bgr)
-
+            mask = cv2.inRange(img, lower, upper)
             img[:, :, 3] = np.where(mask == 255, 0, img[:, :, 3])
 
             name_part, ext_part = os.path.splitext(filename)
             if ext_part.lower() == '.png':
-                is_success, buffer = cv2.imencode(".png", img)
-                if is_success: buffer.tofile(file_path); success_count += 1
+                success_write, buffer = cv2.imencode(".png", img)
+                if success_write:
+                    buffer.tofile(file_path)
+                    success_count += 1
             else:
                 new_path = os.path.join(folder_path, name_part + ".png")
-                is_success, buffer = cv2.imencode(".png", img)
-                if is_success: buffer.tofile(new_path); os.remove(file_path); success_count += 1
+                success_write, buffer = cv2.imencode(".png", img)
+                if success_write:
+                    buffer.tofile(new_path)
+                    os.remove(file_path)
+                    success_count += 1
         except Exception as e:
             print(f"Error {filename}: {e}")
+
     messagebox.showinfo("完成", f"去底完成！共 {success_count} 张。")
 
 
@@ -322,7 +372,7 @@ def _process_batch_remove_bg(folder_path, rgb_str, tolerance):
 def show_ui(parent):
     top = tk.Toplevel(parent)
     top.title("图片处理工具箱")
-    top.geometry("520x620")
+    top.geometry("520x680")
     top.transient(parent)
     top.grab_set()
 
@@ -334,65 +384,87 @@ def show_ui(parent):
     notebook = ttk.Notebook(top)
     notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # Tab 1
     tab1 = tk.Frame(notebook)
     notebook.add(tab1, text="1. PPT 逐页导出")
     _init_ppt_ui(tab1, top)
 
-    # Tab 2
     tab2 = tk.Frame(notebook)
-    notebook.add(tab2, text="2. 批量裁切/扩展")
+    notebook.add(tab2, text="2. 裁切/扩展")
     _init_crop_extend_ui(tab2, top)
 
-    # Tab 3
     tab3 = tk.Frame(notebook)
     notebook.add(tab3, text="3. 批量图片去背景")
     _init_bg_remove_ui(tab3, top)
 
 
 # -----------------------------------------------------------
-# Tab 1 UI
+# Tab 1 UI: PPT
 # -----------------------------------------------------------
 def _init_ppt_ui(frame, parent_win):
     pad_opts = {'padx': 10, 'pady': 5}
 
     def select_file(entry):
         path = filedialog.askopenfilename(filetypes=[("PPT", "*.pptx;*.ppt")], parent=parent_win)
-        if path: entry.delete(0, tk.END); entry.insert(0, path)
+        if path:
+            entry.delete(0, tk.END)
+            entry.insert(0, path)
 
     def select_dir(entry):
         path = filedialog.askdirectory(parent=parent_win)
-        if path: entry.delete(0, tk.END); entry.insert(0, path)
+        if path:
+            entry.delete(0, tk.END)
+            entry.insert(0, path)
 
     tk.Label(frame, text="选择 PPT 文件:").pack(anchor="w", **pad_opts)
-    entry_in = tk.Entry(frame);
+    entry_in = tk.Entry(frame)
     entry_in.pack(fill="x", **pad_opts)
     tk.Button(frame, text="浏览", command=lambda: select_file(entry_in)).pack(anchor="e", padx=10)
 
     tk.Label(frame, text="输出文件夹:").pack(anchor="w", **pad_opts)
-    entry_out = tk.Entry(frame);
+    entry_out = tk.Entry(frame)
     entry_out.pack(fill="x", **pad_opts)
     tk.Button(frame, text="浏览", command=lambda: select_dir(entry_out)).pack(anchor="e", padx=10)
 
     tk.Frame(frame, height=2, bd=1, relief="sunken").pack(fill="x", padx=10, pady=10)
 
+    # 背景设置
+    bg_frame = tk.LabelFrame(frame, text="背景颜色", fg="#2196F3")
+    bg_frame.pack(fill="x", padx=10, pady=5)
+
+    var_trans = tk.BooleanVar(value=True)
+    e_bg_rgb = tk.Entry(bg_frame, width=15)
+    e_bg_rgb.insert(0, "255,255,255")
+
+    def toggle_bg():
+        if var_trans.get():
+            e_bg_rgb.config(state="disabled")
+        else:
+            e_bg_rgb.config(state="normal")
+
+    chk_trans = tk.Checkbutton(bg_frame, text="透明背景 (默认)", variable=var_trans, command=toggle_bg)
+    chk_trans.pack(side="left", padx=10)
+
+    tk.Label(bg_frame, text="RGB:").pack(side="left")
+    e_bg_rgb.pack(side="left", padx=5)
+    toggle_bg()
+
+    tk.Frame(frame, height=2, bd=1, relief="sunken").pack(fill="x", padx=10, pady=10)
+
     tk.Label(frame, text="DPI 设置 (清晰度):").pack(anchor="w", padx=10, pady=(5, 0))
-    dpi_values = ["72 (屏幕)", "96", "150", "288", "300 (打印)", "600"]
+    dpi_values = ["72 (屏幕)", "96", "150", "216 (推荐)", "300 (打印)", "600"]
     combo_dpi = ttk.Combobox(frame, values=dpi_values, width=15)
-    combo_dpi.current(3)  # 默认 216
+    combo_dpi.current(3)
     combo_dpi.pack(anchor="w", padx=10, pady=2)
 
     tk.Label(frame, text="强制比例 (PPT导出阶段):").pack(anchor="w", padx=10, pady=(5, 0))
     combo_ratio = ttk.Combobox(frame, values=["原比例", "16:9", "4:3"], width=15, state="readonly")
-    combo_ratio.current(1);
+    combo_ratio.current(1)
     combo_ratio.pack(anchor="w", padx=10, pady=2)
 
     tk.Frame(frame, height=2, bd=1, relief="sunken").pack(fill="x", padx=10, pady=10)
 
-    # === 实验性功能 ===
-    exp_frame = tk.LabelFrame(frame, text="实验性功能：强制裁切/填充", fg="#E91E63")
+    exp_frame = tk.LabelFrame(frame, text="高级: 手动指定分辨率 (覆盖上方设置)", fg="#E91E63")
     exp_frame.pack(fill="x", padx=10, pady=5)
-
     var_enable = tk.BooleanVar(value=False)
 
     def toggle_exp():
@@ -401,34 +473,30 @@ def _init_ppt_ui(frame, parent_win):
         e_h.config(state=state)
         cb_anchor.config(state=state)
 
-    chk_exp = tk.Checkbutton(exp_frame, text="启用强制分辨率修正 (二次处理)", variable=var_enable, command=toggle_exp)
+    chk_exp = tk.Checkbutton(exp_frame, text="启用手动覆盖", variable=var_enable, command=toggle_exp)
     chk_exp.pack(anchor="w", padx=5)
 
     grid_f = tk.Frame(exp_frame)
     grid_f.pack(fill="x", padx=10, pady=5)
-
-    tk.Label(grid_f, text="目标宽:").grid(row=0, column=0)
-    e_w = tk.Entry(grid_f, width=8);
-    e_w.insert(0, "3840");
+    tk.Label(grid_f, text="宽:").grid(row=0, column=0)
+    e_w = tk.Entry(grid_f, width=8)
+    e_w.insert(0, "3840")
     e_w.grid(row=0, column=1, padx=5)
-
-    tk.Label(grid_f, text="目标高:").grid(row=0, column=2)
-    e_h = tk.Entry(grid_f, width=8);
-    e_h.insert(0, "2160");
+    tk.Label(grid_f, text="高:").grid(row=0, column=2)
+    e_h = tk.Entry(grid_f, width=8)
+    e_h.insert(0, "2160")
     e_h.grid(row=0, column=3, padx=5)
-
-    tk.Label(grid_f, text="锚点(保留):").grid(row=1, column=0, pady=5)
-    anchor_vals = ["左上 (裁剪右/下)", "居中 (裁剪四周)", "左下 (裁剪右/上)", "右上 (裁剪左/下)", "右下 (裁剪左/上)"]
-    cb_anchor = ttk.Combobox(grid_f, values=anchor_vals, state="readonly", width=18)
+    tk.Label(grid_f, text="锚点:").grid(row=1, column=0, pady=5)
+    cb_anchor = ttk.Combobox(grid_f, values=["居中 (推荐)", "左上", "左下", "右上", "右下"], state="readonly", width=15)
     cb_anchor.current(0)
     cb_anchor.grid(row=1, column=1, columnspan=3, sticky="w", padx=5)
-
     toggle_exp()
 
     def run():
         _process_export_transparent_png(
             entry_in.get(), entry_out.get(), combo_dpi.get(), combo_ratio.get(),
-            var_enable.get(), e_w.get(), e_h.get(), cb_anchor.get()
+            var_enable.get(), e_w.get(), e_h.get(), cb_anchor.get(),
+            var_trans.get(), e_bg_rgb.get()
         )
 
     tk.Button(frame, text="开始导出", bg="#FF9800", fg="white", font=("Arial", 12, "bold"), command=run).pack(pady=20,
@@ -437,87 +505,109 @@ def _init_ppt_ui(frame, parent_win):
 
 
 # -----------------------------------------------------------
-# Tab 2 UI (批量裁切/扩展)
+# Tab 2 UI: 裁切 (修改：支持单文件，移除同步)
 # -----------------------------------------------------------
 def _init_crop_extend_ui(frame, parent_win):
     pad_opts = {'padx': 10, 'pady': 8}
 
-    def select_dir(entry):
-        path = filedialog.askdirectory(parent=parent_win)
-        if path: entry.delete(0, tk.END); entry.insert(0, path)
+    # 模式选择变量 (0=folder, 1=file)
+    var_mode = tk.IntVar(value=0)
 
-    tk.Label(frame, text="选择图片文件夹:").pack(anchor="w", **pad_opts)
-    entry_folder = tk.Entry(frame);
-    entry_folder.pack(fill="x", **pad_opts)
-    tk.Button(frame, text="浏览文件夹", command=lambda: select_dir(entry_folder)).pack(anchor="e", padx=10)
+    # 动态浏览命令
+    def browse_action():
+        if var_mode.get() == 0:
+            # 文件夹
+            path = filedialog.askdirectory(parent=parent_win)
+        else:
+            # 单文件
+            path = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp")], parent=parent_win)
+
+        if path:
+            entry_path.delete(0, tk.END)
+            entry_path.insert(0, path)
+
+    # 1. 处理对象选择
+    tk.Label(frame, text="处理对象:").pack(anchor="w", **pad_opts)
+
+    mode_frame = tk.Frame(frame)
+    mode_frame.pack(anchor="w", padx=20)
+    tk.Radiobutton(mode_frame, text="整个文件夹", variable=var_mode, value=0).pack(side="left", padx=5)
+    tk.Radiobutton(mode_frame, text="单张图片", variable=var_mode, value=1).pack(side="left", padx=5)
+
+    entry_path = tk.Entry(frame)
+    entry_path.pack(fill="x", **pad_opts)
+    tk.Button(frame, text="浏览...", command=browse_action).pack(anchor="e", padx=10)
 
     tk.Frame(frame, height=2, bd=1, relief="sunken").pack(fill="x", padx=10, pady=10)
 
-    tk.Label(frame, text="输入像素值 (上 / 下 / 左 / 右):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10)
-
-    hint_frame = tk.LabelFrame(frame, text="规则说明", fg="gray")
-    hint_frame.pack(fill="x", padx=10, pady=5)
-    tk.Label(hint_frame, text="正数 (+): 向内裁切 (图片变小)\n负数 (-): 向外扩展 (图片变大，填充透明像素)",
-             justify="left", fg="#2196F3").pack(anchor="w", padx=5, pady=5)
+    tk.Label(frame, text="裁切/填充像素值 (正数=切, 负数=填):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10)
 
     grid_frame = tk.Frame(frame)
     grid_frame.pack(fill="x", padx=20, pady=10)
 
     tk.Label(grid_frame, text="Top (上):").grid(row=0, column=0, sticky="e", pady=5)
-    e_top = tk.Entry(grid_frame, width=8);
-    e_top.insert(0, "0");
+    e_top = tk.Entry(grid_frame, width=8)
+    e_top.insert(0, "0")
     e_top.grid(row=0, column=1, padx=5)
     tk.Label(grid_frame, text="Bottom (下):").grid(row=0, column=2, sticky="e", pady=5)
-    e_btm = tk.Entry(grid_frame, width=8);
-    e_btm.insert(0, "0");
+    e_btm = tk.Entry(grid_frame, width=8)
+    e_btm.insert(0, "0")
     e_btm.grid(row=0, column=3, padx=5)
+
     tk.Label(grid_frame, text="Left (左):").grid(row=1, column=0, sticky="e", pady=5)
-    e_lft = tk.Entry(grid_frame, width=8);
-    e_lft.insert(0, "0");
+    e_lft = tk.Entry(grid_frame, width=8)
+    e_lft.insert(0, "0")
     e_lft.grid(row=1, column=1, padx=5)
     tk.Label(grid_frame, text="Right (右):").grid(row=1, column=2, sticky="e", pady=5)
-    e_rgt = tk.Entry(grid_frame, width=8);
-    e_rgt.insert(0, "0");
+    e_rgt = tk.Entry(grid_frame, width=8)
+    e_rgt.insert(0, "0")
     e_rgt.grid(row=1, column=3, padx=5)
 
     tk.Label(frame, text="警告：直接覆盖源文件！\n若扩展，JPG将转为PNG。", fg="#E91E63", bg="#FCE4EC", justify="left", bd=1,
              relief="groove").pack(fill="x", padx=10, pady=20, ipady=5)
 
     def run():
-        _process_batch_crop_extend(entry_folder.get(), e_top.get(), e_btm.get(), e_lft.get(), e_rgt.get())
+        # 传递 is_file_mode = (var_mode.get() == 1)
+        _process_crop_extend(
+            entry_path.get(),
+            (var_mode.get() == 1),
+            e_top.get(), e_btm.get(), e_lft.get(), e_rgt.get()
+        )
 
-    tk.Button(frame, text="开始批量处理", bg="#673AB7", fg="white", font=("Arial", 12, "bold"), command=run).pack(
+    tk.Button(frame, text="开始处理", bg="#673AB7", fg="white", font=("Arial", 12, "bold"), command=run).pack(
         side="bottom", pady=20, fill="x", padx=20)
 
 
 # -----------------------------------------------------------
-# Tab 3 UI (去底)
+# Tab 3 UI: 去底
 # -----------------------------------------------------------
 def _init_bg_remove_ui(frame, parent_win):
     pad_opts = {'padx': 10, 'pady': 8}
 
     def select_dir(entry):
         path = filedialog.askdirectory(parent=parent_win)
-        if path: entry.delete(0, tk.END); entry.insert(0, path)
+        if path:
+            entry.delete(0, tk.END)
+            entry.insert(0, path)
 
     tk.Label(frame, text="选择图片文件夹:").pack(anchor="w", **pad_opts)
-    entry_folder = tk.Entry(frame);
+    entry_folder = tk.Entry(frame)
     entry_folder.pack(fill="x", **pad_opts)
     tk.Button(frame, text="浏览文件夹", command=lambda: select_dir(entry_folder)).pack(anchor="e", padx=10)
 
     tk.Frame(frame, height=2, bd=1, relief="sunken").pack(fill="x", padx=10, pady=10)
 
     tk.Label(frame, text="背景色 (RGB):").pack(anchor="w", padx=10)
-    frame_c = tk.Frame(frame);
+    frame_c = tk.Frame(frame)
     frame_c.pack(fill="x", padx=10)
-    entry_rgb = tk.Entry(frame_c, width=15);
-    entry_rgb.insert(0, "255,255,255");
+    entry_rgb = tk.Entry(frame_c, width=15)
+    entry_rgb.insert(0, "255,255,255")
     entry_rgb.pack(side="left")
     tk.Label(frame_c, text="(如 0,0,0 黑色)", fg="gray").pack(side="left", padx=10)
 
     tk.Label(frame, text="容差 (0-100):").pack(anchor="w", padx=10, pady=(10, 0))
-    scale_tol = tk.Scale(frame, from_=0, to=100, orient="horizontal");
-    scale_tol.set(10);
+    scale_tol = tk.Scale(frame, from_=0, to=100, orient="horizontal")
+    scale_tol.set(10)
     scale_tol.pack(fill="x", padx=20, pady=5)
 
     tk.Label(frame, text="警告：覆盖源文件！JPG转PNG。", fg="#E91E63", bg="#FCE4EC", justify="left", bd=1,

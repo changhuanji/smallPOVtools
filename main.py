@@ -1,5 +1,4 @@
 import tkinter as tk
-from tkinter import messagebox
 
 # === 导入功能模块 ===
 try:
