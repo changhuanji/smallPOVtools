@@ -1,0 +1,13 @@
+# 忽略 IDE 配置
+.idea/
+.vscode/
+__pycache__/
+
+# 忽略 编译文件 和 外部依赖
+*.exe
+*.pyc
+
+# 忽略 输出的临时文件 (可选)
+*.png
+*.mov
+*.webm

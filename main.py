@@ -2,12 +2,12 @@ import tkinter as tk
 
 # === 导入功能模块 ===
 try:
-    import a0
-    import a1
-    import a2
-    import b0
-    import b1
-    import b2
+    import ppt_tools
+    import ppt_color_tools
+    import ppt_img_tools
+    import video_tools
+    import launcher_tools
+    import web_tools
 except ImportError as e:
     print(f"严重错误：缺少模块文件 - {e}")
     print("请确保所有工具脚本都在同一目录下。")
@@ -37,14 +37,14 @@ def create_main_interface():
     # 它将主窗口 root 传递给子模块
     buttons_map = [
         # 第一行
-        ("PPT生成器", lambda: a0.show_ui(root)),
-        ("PPT改色/去空", lambda: a1.show_ui(root)),
-        ("导出透明PNG", lambda: a2.show_ui(root)),
+        ("PPT生成器", lambda: ppt_tools.show_ui(root)),
+        ("PPT改色/去空", lambda: ppt_color_tools.show_ui(root)),
+        ("导出透明PNG", lambda: ppt_img_tools.show_ui(root)),
 
         # 第二行
-        ("图片转动画", lambda: b0.show_ui(root)),
-        ("启动外部程序", lambda: b1.show_ui(root)),
-        ("地图/API工具", lambda: b2.show_ui(root)),
+        ("图片转动画", lambda: video_tools.show_ui(root)),
+        ("帧数计算", lambda: launcher_tools.show_ui(root)),
+        ("地图/API工具", lambda: web_tools.show_ui(root)),
     ]
 
     idx = 0
