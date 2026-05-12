@@ -11,3 +11,9 @@ __pycache__/
 *.png
 *.mov
 *.webm
+
+
+*.xml
+
+# 忽略计划/笔记文件
+plans/

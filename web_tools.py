@@ -60,9 +60,7 @@ def _api_placeholder():
 def show_ui(parent):
     top = tk.Toplevel(parent)
     top.title("网络工具箱")
-    top.geometry("400x350")
-    top.transient(parent) # 修改点
-    top.grab_set()        # 修改点
+    top.geometry("500x450")
 
     # 居中
     top.update_idletasks()

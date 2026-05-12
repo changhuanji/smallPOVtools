@@ -77,9 +77,7 @@ def _process_ppt_generation(template_path, txt_path, output_path, placeholder):
 def show_ui(parent):
     top = tk.Toplevel(parent)
     top.title("PPT 批量生成器")
-    top.geometry("500x400")
-    top.transient(parent) # 修改点
-    top.grab_set()        # 修改点
+    top.geometry("600x500")
 
     # 居中
     top.update_idletasks()

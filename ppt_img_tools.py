@@ -32,7 +32,7 @@ def _process_export_transparent_png(input_path, output_dir, dpi_str, target_rati
         return
 
     # 2. 解析参数
-    target_dpi = 216
+    target_dpi = 288
     try:
         nums = re.findall(r"\d+", str(dpi_str))
         if nums:
@@ -372,9 +372,7 @@ def _process_batch_remove_bg(folder_path, rgb_str, tolerance):
 def show_ui(parent):
     top = tk.Toplevel(parent)
     top.title("图片处理工具箱")
-    top.geometry("520x680")
-    top.transient(parent)
-    top.grab_set()
+    top.geometry("650x750")
 
     top.update_idletasks()
     x = (top.winfo_screenwidth() - top.winfo_width()) // 2
@@ -451,7 +449,7 @@ def _init_ppt_ui(frame, parent_win):
     tk.Frame(frame, height=2, bd=1, relief="sunken").pack(fill="x", padx=10, pady=10)
 
     tk.Label(frame, text="DPI 设置 (清晰度):").pack(anchor="w", padx=10, pady=(5, 0))
-    dpi_values = ["72 (屏幕)", "96", "150", "216 (推荐)", "300 (打印)", "600"]
+    dpi_values = ["72 (屏幕)", "96", "150", "288 (推荐)", "300 (打印)", "600"]
     combo_dpi = ttk.Combobox(frame, values=dpi_values, width=15)
     combo_dpi.current(3)
     combo_dpi.pack(anchor="w", padx=10, pady=2)

@@ -93,10 +93,7 @@ class SpeedCalculatorApp:
     def __init__(self, root):
         self.top = tk.Toplevel(root)
         self.top.title("视频变速计算器")
-        self.top.geometry("520x550")
-
-        # 窗口层级处理
-        self.top.transient(root)
+        self.top.geometry("650x750")
 
         # 居中
         self.top.update_idletasks()
@@ -139,12 +136,24 @@ class SpeedCalculatorApp:
         self.input_start = TimeCodeInput(frame_target, "起始时间:")
         self.input_start.pack(fill="x", pady=5)
 
+        # 交换时间按钮
+        self.btn_swap = tk.Button(frame_target, text="⇄ 交换时间",
+                                  command=self.swap_times,
+                                  font=("Arial", 10), bg="#E3F2FD", cursor="hand2")
+        self.btn_swap.pack(pady=5)
+
         self.input_end = TimeCodeInput(frame_target, "结束时间:")
         self.input_end.pack(fill="x", pady=5)
 
         # === 4. 原素材长度 (Source) ===
         frame_source = tk.LabelFrame(self.top, text="原素材长度 (Source)", fg="#4CAF50")
         frame_source.pack(fill="x", padx=20, pady=10)
+
+        # 锁定选项
+        self.var_lock_src = tk.BooleanVar(value=False)
+        chk_lock = tk.Checkbutton(frame_source, text="锁定素材时长", variable=self.var_lock_src,
+                                  command=self.toggle_lock_source)
+        chk_lock.pack(anchor="w", padx=10, pady=5)
 
         self.input_src_len = TimeCodeInput(frame_source, "素材时长:")
         self.input_src_len.pack(fill="x", pady=5)
@@ -154,7 +163,17 @@ class SpeedCalculatorApp:
         self.input_start.set_next_group(self.input_end)
         self.input_end.set_next_group(self.input_src_len)
 
-        # === 5. 结果显示与操作 ===
+        # === 5. 计算选项 ===
+        frame_options = tk.Frame(self.top)
+        frame_options.pack(fill="x", padx=20, pady=5)
+
+        # 负倍率选项
+        self.var_negative = tk.BooleanVar(value=False)
+        chk_negative = tk.Checkbutton(frame_options, text="启用负倍率 (倒放)", variable=self.var_negative,
+                                      fg="#E91E63")
+        chk_negative.pack(side="left", padx=10)
+
+        # === 6. 结果显示与操作 ===
         frame_action = tk.Frame(self.top)
         frame_action.pack(fill="both", expand=True, padx=20, pady=10)
 
@@ -179,6 +198,17 @@ class SpeedCalculatorApp:
     def toggle_topmost(self):
         self.top.attributes('-topmost', self.var_topmost.get())
 
+    def toggle_lock_source(self):
+        """锁定/解锁原素材长度输入"""
+        if self.var_lock_src.get():
+            # 锁定：禁用输入框
+            for entry in self.input_src_len.entries:
+                entry.config(state="disabled")
+        else:
+            # 解锁：启用输入框
+            for entry in self.input_src_len.entries:
+                entry.config(state="normal")
+
     def calculate(self):
         try:
             # 获取 FPS
@@ -202,8 +232,9 @@ class SpeedCalculatorApp:
 
             target_duration = f_end - f_start
 
-            if target_duration <= 0:
-                messagebox.showerror("错误", "结束时间必须大于起始时间", parent=self.top)
+            # 允许负倍率：结束时间可以早于起始时间
+            if target_duration == 0:
+                messagebox.showerror("错误", "起始时间和结束时间不能相同", parent=self.top)
                 return
 
             if f_src_len <= 0:
@@ -219,15 +250,20 @@ class SpeedCalculatorApp:
             sec_target = target_duration / tl_fps
             sec_source = f_src_len / src_fps
 
+            # 计算速度比率（支持负倍率）
             speed_ratio = (sec_source / sec_target) * 100
 
+            # 如果启用了负倍率选项，取反
+            if self.var_negative.get():
+                speed_ratio = -speed_ratio
+
             # 格式化输出
-            result_str = f"{speed_ratio:.2f}"
+            result_str = f"{speed_ratio:.8f}"
 
             # 更新界面
             self.lbl_speed.config(text=f"{result_str} %")
             self.lbl_info.config(
-                text=f"目标时长: {sec_target:.2f}s ({int(target_duration)}帧)\n原素材: {sec_source:.2f}s ({int(f_src_len)}帧)")
+                text=f"目标时长: {sec_target:.8f}s ({int(target_duration)}帧)\n原素材: {sec_source:.8f}s ({int(f_src_len)}帧)")
 
             # 自动复制
             self.top.clipboard_clear()
@@ -247,6 +283,23 @@ class SpeedCalculatorApp:
         self.top.clipboard_clear()
         self.top.clipboard_append(val)
         messagebox.showinfo("提示", "已复制到剪贴板", parent=self.top)
+
+    def swap_times(self):
+        """交换起始时间和结束时间的值"""
+        # 获取起始时间的值
+        start_values = [var.get() for var in self.input_start.vars]
+        # 获取结束时间的值
+        end_values = [var.get() for var in self.input_end.vars]
+
+        # 交换值
+        for i in range(4):
+            self.input_start.vars[i].set(end_values[i])
+            self.input_end.vars[i].set(start_values[i])
+
+        # 视觉反馈 - 按钮短暂变色
+        original_bg = self.btn_swap.cget("bg")
+        self.btn_swap.config(bg="#C8E6C9")  # 浅绿
+        self.top.after(200, lambda: self.btn_swap.config(bg=original_bg))
 
 
 # ==============================================================================

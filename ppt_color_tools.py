@@ -68,9 +68,7 @@ def _process_modify_ppt(input_path, output_path, rgb_str, do_color, remove_space
 def show_ui(parent):
     top = tk.Toplevel(parent)
     top.title("PPT 改色与清理工具")
-    top.geometry("500x450")
-    top.transient(parent) # 修改点
-    top.grab_set()        # 修改点
+    top.geometry("600x550")
 
     top.update_idletasks()
     x = (top.winfo_screenwidth() - top.winfo_width()) // 2

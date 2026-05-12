@@ -179,10 +179,7 @@ def _render_video_thread(img_path, output_path, res_mode, res_w, res_h, fps,
 def show_ui(parent):
     top = tk.Toplevel(parent)
     top.title("透明MOV生成器 (ProRes/GPU)")
-    top.geometry("550x800")  # 加高以容纳新选项
-
-    top.transient(parent)
-    top.grab_set()
+    top.geometry("700x900")  # 加高以容纳新选项
     top.update_idletasks()
     x = (top.winfo_screenwidth() - top.winfo_width()) // 2
     y = (top.winfo_screenheight() - top.winfo_height()) // 2
